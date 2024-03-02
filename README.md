@@ -3,7 +3,7 @@
 
 使用link管理patch模块，不需要手动拷贝，自动同步增删改。
 
-<video src="docs/record.mp4"  width="100%" height=auto/>
+<video src="docs/record.mp4" controls="controls"  width="100%" height=auto ></video>
 
 切换当前的patch：
 
