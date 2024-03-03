@@ -63,3 +63,21 @@ positional arguments:
 options:
   -h, --help         show this help message and exit
 ```
+
+## Configure
+
+init 之后，会在项目根目录下出现`sync-config.json`文件
+
+```
+{
+  "home": "GamePatches", // 存放所有patch的路径
+  "mappings": // 目录或文件的映射
+  {
+    "Editor": "Assets/Editor/PatchTools", // patch内的Editor会在应用后映射到Assets/Editor/PatchTools，多个patch只有最后一个生效
+    "AOT": "Assets/{name}-AOT", // {name}会自动替换为patch名称，多个patch同时生效
+    "HotFix": "Assets/HotFix/PatchLogic" // 见上
+  }
+}
+```
+
+mappings下的文件会映射到项目目录内，项目内的相关路径需要先在版本控制软件内Ingore。直接在工程路径下增删改，会自动同步到Patch路径下。
