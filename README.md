@@ -2,7 +2,6 @@
 多patch管理工具，多渠道、多Mod场景下开发维护的利器。
 
 使用link管理patch模块，不需要手动拷贝，自动同步增删改。
-
 ![gif](docs/qgetd-7q4ru.gif)
 
 切换当前的patch：
@@ -11,11 +10,43 @@
 python patch_manager.py apply patch1 patch2
 ```
 
-切换时，会删除和创建相关的文件和目录。
+## Scenarios
+以下场景有用：
+* 当你的项目需要发布到几十个渠道
+* 当你的项目有众多Mod
+* etc
 
-创建和删除内容时，会自动检测是否是对应的link，完全不用担心丢失work copy的问题。
+应用场景的本质是多模块的管理。对于模块耦合度比较低、单个模块规模较大时，可以使用monorepo的方式进行管理；但是如果模块并不容易解耦、且模块较小，monorepo或多仓库的方式会相对笨重。
 
-patch之间可以通过dependencies设置依赖关系
+另外，模块内容的安放路径如果有限制，也不容易实现monorepo类管理。如：Unity项目可能会区分AOT、HotFix、Editor目录。
+
+因此，此仓库的意义在于解决了多模块管理的“最后一公里"问题。
+
+`
+值得一提的是，patch manager管理的模块在迭代到一定成熟度后，也可以近乎无成本转换为monorepo。
+`
+
+## Under the Hood
+
+切换时，会删除和创建相关的文件和目录。但是完全不用担心丢失work copy的问题。
+
+自动创建内容时，会检测并满足以下条件：
+* 目标路径不在patch下
+
+自动删除内容时，会检测并满足以下条件：
+* 目标是个link
+* link指向patch下内容
+
+patch之间可以通过dependencies设置依赖关系，自动循环依赖检测
+
+如，可能有以下patch：
+* webgl-common #webgl相关的功能
+* webgl-mobile #webgl手机端功能
+* webgl-desktop #webgl桌面端功能
+* wx-mini: webgl-common webgl-mobile #微信小游戏模块，依赖webgl-common webgl-mobile
+* qq-hall: webgl-common webgl-desktop #QQ游戏大厅模块，依赖webgl-common webgl-desktop
+
+应用wx-mini时，会按顺序应用：依赖webgl-common, webgl-mobile, wx-mini
 
 ## Usage
 
