@@ -16,15 +16,13 @@ python patch_manager.py apply patch1 patch2
 * 当你的项目有众多Mod
 * etc
 
-应用场景的本质是多模块的管理。对于模块耦合度比较低、单个模块规模较大时，可以使用monorepo的方式进行管理；但是如果模块并不容易解耦、且模块较小，monorepo或多仓库的方式会相对笨重。
+应用场景的本质是多模块的管理。对于模块耦合度比较低、单个模块规模较大时，可以使用monorepo的方式进行管理；但是如果模块并不容易解耦、且模块较小，monorepo或多仓库的方式会相对笨重。换言之，并不是所有的系统都适合解耦为"Module"，很多时候最多是个"Patch"，这也是PatchManager命名的原由。
 
-另外，模块内容的安放路径如果有限制，也不容易实现monorepo类管理。如：Unity项目可能会区分AOT、HotFix、Editor目录。
+> 如：Unity项目对目录安放位置有要求，可能会区分AOT、HotFix、Editor、Plugins等。
 
 因此，此仓库的意义在于解决了多模块管理的“最后一公里"问题。
 
-`
-值得一提的是，patch manager管理的模块在迭代到一定成熟度后，也可以近乎无成本转换为monorepo。
-`
+> 值得一提的是，patch manager管理的模块在迭代到一定成熟度后，也可以近乎无成本转换为monorepo。
 
 ## Under the Hood
 
