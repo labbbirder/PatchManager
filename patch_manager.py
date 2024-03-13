@@ -86,7 +86,7 @@ class PatchManager:
         # load records
         if not pexists(RECORD_FILE_PATH):
             with open(RECORD_FILE_PATH,"w+t",encoding="utf-8") as f:
-                f.write("path,inode")
+                f.write("path,inode\n")
             # if _is_windows:
             #     _shell("attrib","+H",RECORD_FILE_PATH)
         for path,inode in _irecords():
@@ -198,7 +198,7 @@ class PatchManager:
             self.__delete_link(path)
 
         with open(RECORD_FILE_PATH,"w+t",encoding="utf-8") as f:
-            f.write("path,inode")
+            f.write("path,inode\n")
 
     def __extract_dependent_patches(self,patches:list[str]):
         visiting = set()
