@@ -1,14 +1,16 @@
-#coding:utf-8
+﻿#coding:utf-8
 #author:bbbirder
 import os
 import platform
-from os.path import join as pjoin,exists as pexists
+from os.path import join as pjoin,exists as pexists, abspath, realpath
 import argparse
 import commentjson as json
 import subprocess
 import pathvalidate
+# import hashlib
+# import pandas as pd
 
-TEMPLATE_HOME_CONFIG = """{
+HOME_CONFIG_TEMPLATE = """{
     "home": "%s",
     "mappings": 
     {
@@ -16,12 +18,13 @@ TEMPLATE_HOME_CONFIG = """{
     }
 }"""
 
-TEMPLATE_PATCH_CONFIG = """{
+PATCH_CONFIG_TEMPLATE = """{
     "dependencies": []
 }"""
 
 HOME_CONFIG_NAME = "sync-config.json"
 PATCH_CONFIG_NAME = "patch-config.json"
+RECORD_FILE_PATH = ".sync.tsv"
 
 _is_windows = "windows" in platform.system().lower()
 
@@ -40,37 +43,77 @@ def _shell(bin,*args):
         raise Exception(r.stderr)
     return r.returncode,r.stdout
 
+def _os_mklink(link_path,target_path,hardlink=True):
+    if _is_windows:
+        if os.path.isfile(target_path):
+            if hardlink:
+                _shell("cmd","/c","mklink","/H",link_path,target_path)
+            else:
+                _shell("cmd","/c","mklink",link_path,target_path)
+        elif os.path.isdir(target_path):
+            _shell("cmd","/c","mklink","/J",link_path,target_path)
+        else:
+            raise Exception(f"target path not exists: {target_path}")
+    else:
+        _shell("ln","-s",link_path,target_path)
+
+def _record_link(path):
+    inode = os.stat(path).st_ino
+    record_path = RECORD_FILE_PATH
+    with open(record_path,"a+t",encoding="utf-8") as f:
+        f.write(f"{path}\t{inode}\n")
+
+def _irecords():
+    if not pexists(RECORD_FILE_PATH): return
+    with open(RECORD_FILE_PATH,"rt",encoding="utf-8") as f:
+        f.readline() #ignore head
+        while True:
+            line = f.readline()
+            if not line: break
+            yield line.split("\t")
+
 class PatchManager:
-    def __init__(self,quiet:bool=False) -> None:
+    def __init__(self,quiet:bool=False,delete_meta=True) -> None:
         if not pexists(HOME_CONFIG_NAME):
             raise Exception("not a valid project. please init first.")
         with open(HOME_CONFIG_NAME,"r",encoding="utf-8") as f:
             self.__config = json.load(f)
         self.__patch_home = self.__config["home"]
         self.mappings = self.__config["mappings"]
-        self.patch_entries = set()
+        self.__delete_meta = delete_meta
         self.__quiet = quiet
+        self.records = {}
+        # load records
+        if not pexists(RECORD_FILE_PATH):
+            with open(RECORD_FILE_PATH,"w+t",encoding="utf-8") as f:
+                f.write("path,inode")
+            # if _is_windows:
+            #     _shell("attrib","+H",RECORD_FILE_PATH)
+        for path,inode in _irecords():
+            self.records[path] = inode
+        
+        self.patch_entries = dict()
+        # load patches inodes
         for patch in self.get_patches():
             patch_root = pjoin(self.__patch_home,patch)
             for entry in os.listdir(patch_root):
                 entry = pjoin(patch_root,entry)
-                if os.path.exists(entry):
-                    self.patch_entries.add(os.stat(entry).st_ino)
+                if pexists(entry):
+                    self.patch_entries[os.stat(entry).st_ino] = entry
         pass
-
+    
     def __log(self,*args):
         if not self.__quiet:
             print(*args)
 
     def __is_patch_link(self,path):
+        '''
+        it's one the link from patch entries
+        '''
         # inode approach
-        if not os.path.exists(path):
+        if not pexists(path):
             return False
-        home = os.path.abspath(self.__patch_home)
-        apath = os.path.abspath(path)
-        
-        if apath.startswith(home):
-            return False
+        apath = abspath(path)
         return os.stat(apath).st_ino in self.patch_entries
     
         # fsutil approach
@@ -95,10 +138,11 @@ class PatchManager:
 
     def __make_link(self,link_path:str,target_path:str):
         self.__log(f"link {link_path} -> {target_path}")
-        link_path = os.path.abspath(link_path)
-        target_path = os.path.abspath(target_path)
+        
+        link_path = abspath(link_path)
+        target_path = abspath(target_path)
 
-        home = os.path.abspath(self.__patch_home)
+        home = abspath(self.__patch_home)
         if link_path.startswith(home):
             raise Exception(f"you can't create link inside patches root! {link_path}->{home}")
 
@@ -106,30 +150,42 @@ class PatchManager:
         os.makedirs(parent_path,exist_ok=True)
 
         _update_modified_time(target_path)
-        if _is_windows:
-            if os.path.isfile(target_path):
-                _shell("cmd","/c",'mklink','/H',link_path,target_path)
-            elif os.path.isdir(target_path):
-                _shell("cmd","/c",'mklink','/J',link_path,target_path)
-            else:
-                raise Exception(f"target path not exists: {target_path}")
-        else:
-            _shell("ln","-s",link_path,target_path)
+        _os_mklink(link_path,target_path)
+
+        _record_link(link_path)
         
     def __delete_link(self,path):
-        if self.__is_patch_link(path): # its a valid link from patches
-            return os.remove(path)
-        if not os.path.lexists(path): # a broken links
+        # remove meta file
+        if self.__delete_meta:
+            if abspath(path) not in self.__mappings or abspath(path+".meta") in self.__mappings:
+                try:
+                    os.remove(path+".meta")
+                except:
+                    pass
+        
+        if not os.path.lexists(path): return
+
+        if not pexists(path): # a broken links
             try:
                 return os.remove(path)
             except:
                 pass
-        if os.path.exists(path):
-            raise Exception(f"Cannot safely delete target path: {path}, which is not a valid patch link. "
-                "Remove it manually after making sure it's not an important work copy content")
+
+        if self.records.get(path)==os.stat(path).st_ino: # a link inside records
+            return os.remove(path)
+        if os.path.isdir(path) and not os.listdir(path): # an empty dir
+            return os.removedirs(path)
+        
+        if self.__is_patch_link(path): # its a valid link from patches
+            return os.remove(path)
+
+        # if os.path.exists(path):
+        raise Exception(f"Cannot safely delete target path: {path}, which is not a valid patch link. "
+            "Remove it manually after making sure it's not an important work copy content")
         
     def clean_patches(self):
         self.__log("clean patches...")
+        
         for (f,t) in self.mappings.items():
             if "{name}" in t:
                 for patch in self.get_patches():
@@ -137,6 +193,12 @@ class PatchManager:
                     self.__delete_link(path)
             else:
                 self.__delete_link(t)
+        
+        for path,inode in _irecords():
+            self.__delete_link(path)
+
+        with open(RECORD_FILE_PATH,"w+t",encoding="utf-8") as f:
+            f.write("path,inode")
 
     def __extract_dependent_patches(self,patches:list[str]):
         visiting = set()
@@ -168,7 +230,6 @@ class PatchManager:
         return config
 
     def apply_patches(self,patches:list[str]):
-        self.clean_patches()
             
         mappings = {}
         deps = self.__extract_dependent_patches(patches)
@@ -180,16 +241,21 @@ class PatchManager:
                 pfrom = pjoin(patch_root,f)
                 pto = t.replace("{name}",patch)
                 if not pexists(pfrom): continue
-                mappings[pfrom] = pto
-        for (f,t) in mappings.items():
+                mappings[abspath(pto)] = abspath(pfrom)
+        self.__mappings = mappings
+
+        self.clean_patches()
+
+        for (t,f) in mappings.items():
             self.__make_link(t,f)
+
         self.__log("completed!")
 
 if __name__=="__main__":
     def init_project(args):
         os.chdir(args["project"])
 
-        if os.path.exists(HOME_CONFIG_NAME):
+        if pexists(HOME_CONFIG_NAME):
             raise Exception(f"project has already been inited")
         
         home = args["home"]
@@ -199,13 +265,13 @@ if __name__=="__main__":
             raise Exception(f"{home} is not valid directory name")
 
         with open(HOME_CONFIG_NAME,"+xt") as f:
-            f.write(TEMPLATE_HOME_CONFIG%home)
+            f.write(HOME_CONFIG_TEMPLATE%home)
         os.makedirs(home,exist_ok=True)
         if not os.listdir(home):
             os.makedirs(pjoin(home,"patch-1"))
             os.makedirs(pjoin(home,"patch-1","folder1"))
             with open(pjoin(home,"patch-1",PATCH_CONFIG_NAME),"+xt") as f:
-                f.write(TEMPLATE_PATCH_CONFIG)
+                f.write(PATCH_CONFIG_TEMPLATE)
             
 
     def list_patches(args):
@@ -214,7 +280,7 @@ if __name__=="__main__":
             print(patch)
     
     def apply_patches(args):
-        manager = PatchManager(args["quiet"])
+        manager = PatchManager(args["quiet"],args["delete_meta"])
         manager.apply_patches(args["patches"])
         
     parser = argparse.ArgumentParser(description="patch 工具")
@@ -230,6 +296,7 @@ if __name__=="__main__":
     
     apply_parser = subparsers.add_parser("apply", help="apply patches")
     apply_parser.add_argument("-q","--quiet",help="dont print log",action="store_true",default=False)
+    apply_parser.add_argument("--delete-meta",help="remove meta file as well. (especially for Unity3D project)",action="store_true",default=False)
     apply_parser.add_argument("patches",nargs="+")
     apply_parser.set_defaults(func=apply_patches)
     
